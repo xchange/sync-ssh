@@ -58,7 +58,7 @@ jobs:
       - name: Build GPUI desktop executable
         shell: bash
         run: |
-          if cargo build --locked -p sync-ssh > desktop-build.log 2>&1; then
+          if CARGO_TERM_COLOR=never cargo build --locked -p sync-ssh > desktop-build.log 2>&1; then
             cat desktop-build.log
           else
             cat desktop-build.log

@@ -18,3 +18,4 @@ strip = true
 
 [patch.crates-io]
 gpui-terminal = { path = "vendor/gpui-terminal" }
+xattr = { path = "vendor/xattr" }
