@@ -1,0 +1,20 @@
+[workspace]
+members = ["crates/syncssh-core", "crates/syncssh-session", "crates/syncssh-app"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.2"
+edition = "2021"
+license = "MIT"
+rust-version = "1.89"
+
+[profile.dev]
+debug = 0
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[patch.crates-io]
+gpui-terminal = { path = "vendor/gpui-terminal" }

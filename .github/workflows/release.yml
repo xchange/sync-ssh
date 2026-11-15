@@ -1,0 +1,156 @@
+name: Build and publish Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing version tag, for example v0.1.2'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 2
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      commit: ${{ steps.commit.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ github.event.inputs.tag || github.ref_name }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-validation
+      - name: Verify version tag matches source
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: python3 scripts/release.py version --tag "$RELEASE_TAG" --github-output "$GITHUB_OUTPUT"
+      - name: Pin the source commit for all build jobs
+        id: commit
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - run: cargo fmt --all --check
+      - run: python3 -m unittest discover -s scripts/tests -v
+      - name: Test encrypted storage and SSH sessions
+        env:
+          SHELL: /bin/sh
+        run: cargo test --locked -p syncssh-core -p syncssh-session
+
+  build:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos
+            runner: macos-15
+            arch: arm64
+            target: aarch64-apple-darwin
+          - platform: macos
+            runner: macos-15-intel
+            arch: x86_64
+            target: x86_64-apple-darwin
+          - platform: windows
+            runner: windows-latest
+            arch: x86_64
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      APP_VERSION: ${{ needs.prepare.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ matrix.target }}
+      - name: Test and package macOS release
+        if: matrix.platform == 'macos'
+        env:
+          APP_ARCH: ${{ matrix.arch }}
+        run: |
+          cargo test --locked --release -p sync-ssh --bin sync-ssh --test bundled_fonts
+          ./scripts/build-macos.sh release
+          python3 scripts/release.py package-macos --version "$APP_VERSION" --arch "$APP_ARCH"
+      - name: Test and package Windows single executable
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          $env:RUSTFLAGS = '-C target-feature=+crt-static'
+          cargo test --locked --release --target $env:BUILD_TARGET -p sync-ssh --bin sync-ssh --test bundled_fonts
+          if ($LASTEXITCODE -ne 0) { throw 'Release tests failed' }
+          Remove-Item Env:RUSTFLAGS
+          .\scripts\build-windows.ps1 -Mode release -Target $env:BUILD_TARGET
+          python scripts/release.py package-windows --version $env:APP_VERSION
+          if ($LASTEXITCODE -ne 0) { throw 'Windows package validation failed' }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ matrix.platform }}-${{ matrix.arch }}
+          path: artifacts/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
+
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      APP_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: artifacts
+          merge-multiple: true
+      - name: Verify complete download set and generate checksums
+        run: python3 scripts/release.py manifest --version "$APP_VERSION" --repo "$GH_REPO"
+      - name: Publish the download page after all platforms succeed
+        run: |
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > release-state.txt 2> release-state-error.txt; then
+            if [ "$(cat release-state.txt)" != true ]; then
+              echo "This version is already published; use a new version tag."
+              exit 1
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft \
+              --title "SyncSSH $APP_VERSION" --notes-file artifacts/RELEASE_NOTES.md --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" artifacts/*.zip artifacts/*.exe artifacts/SHA256SUMS.txt --clobber
+          gh release edit "$RELEASE_TAG" --draft=false
+          gh release view "$RELEASE_TAG" --json url --jq .url >> "$GITHUB_STEP_SUMMARY"

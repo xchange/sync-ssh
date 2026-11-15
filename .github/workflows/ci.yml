@@ -1,0 +1,69 @@
+name: Rust desktop checks
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux native dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lrzsz build-essential cmake clang lld pkg-config libasound2-dev libfontconfig1-dev libfreetype6-dev libglib2.0-dev libssl-dev libvulkan-dev libwayland-dev libx11-xcb-dev libxkbcommon-x11-dev libxcb1-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-cursor-dev libxcursor-dev libxi-dev libxrandr-dev libxinerama-dev
+      - name: macOS ZMODEM test peer
+        if: runner.os == 'macOS'
+        run: brew install lrzsz
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --all --check
+      - name: Release packaging helper tests
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s scripts/tests -v
+      - name: Check Windows packaging script syntax
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/build-windows.ps1'), [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) { $parseErrors | ForEach-Object { Write-Error $_ }; exit 1 }
+      - name: Core and session tests
+        run: cargo test --locked -p syncssh-core -p syncssh-session
+      - name: ZMODEM interoperability with lrzsz
+        if: runner.os != 'Windows'
+        env:
+          SHELL: /bin/sh
+        run: cargo test --locked -p syncssh-session --test zmodem_loopback -- --ignored
+      - name: Build GPUI desktop executable
+        run: cargo build --locked -p sync-ssh
+      - name: Backup routing and bundled font tests
+        run: cargo test --locked -p sync-ssh --bin sync-ssh --test bundled_fonts
+      - name: Terminal rendering and search tests
+        run: cargo test --locked -p gpui-terminal --lib
+      - name: Native terminal font fallback
+        if: runner.os != 'Linux'
+        run: cargo test --locked -p sync-ssh --test native_font_fallbacks
+      - name: Package macOS debug application
+        if: runner.os == 'macOS'
+        run: ./scripts/build-macos.sh debug

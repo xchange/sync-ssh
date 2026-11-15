@@ -1,0 +1,15 @@
+/target
+.env
+.env.*
+!.env.example
+*.vault
+*.vault.previous
+.sync-ssh/
+vault-location.json
+known_hosts.json
+preferences.json
+.DS_Store
+
+/dist
+/artifacts
+__pycache__/

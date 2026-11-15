@@ -1,0 +1,25 @@
+#include <windows.h>
+#pragma code_page(65001)
+// build.rs fills these values from the Cargo package version and icon path.
+1 ICON "@SYNCSSH_ICON@"
+1 VERSIONINFO
+ FILEVERSION @SYNCSSH_VERSION_NUMBERS@
+ PRODUCTVERSION @SYNCSSH_VERSION_NUMBERS@
+ FILETYPE VFT_APP
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "040904B0"
+  BEGIN
+   VALUE "FileDescription", "SyncSSH SSH Client\0"
+   VALUE "FileVersion", "@SYNCSSH_VERSION@\0"
+   VALUE "ProductName", "SyncSSH\0"
+   VALUE "ProductVersion", "@SYNCSSH_VERSION@\0"
+   VALUE "OriginalFilename", "SyncSSH.exe\0"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x0409, 1200
+ END
+END

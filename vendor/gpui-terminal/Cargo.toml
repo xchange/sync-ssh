@@ -1,0 +1,20 @@
+[package]
+name = "gpui-terminal"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/zortax/gpui-terminal"
+autobins = false
+
+[dependencies]
+alacritty_terminal = "0.25.1"
+anyhow = "1"
+arboard = { version = "3", features = ["wayland-data-control"] }
+flume = "0.12"
+gpui = "=0.2.2"
+parking_lot = "0.12"
+portable-pty = "0.9"
+ropey = "1"
+# GPUI's Windows glyph lookup treats glyph 0 (.notdef) as present. Use the
+# same font-kit fork as GPUI to query system font coverage correctly.
+font-kit = { package = "zed-font-kit", version = "=0.14.1-zed" }
