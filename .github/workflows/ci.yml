@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-14, ubuntu-24.04, windows-latest]
+        os: [macos-15, ubuntu-24.04, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     env:
@@ -56,7 +56,19 @@ jobs:
           SHELL: /bin/sh
         run: cargo test --locked -p syncssh-session --test zmodem_loopback -- --ignored
       - name: Build GPUI desktop executable
-        run: cargo build --locked -p sync-ssh
+        shell: bash
+        run: |
+          if cargo build --locked -p sync-ssh > desktop-build.log 2>&1; then
+            cat desktop-build.log
+          else
+            cat desktop-build.log
+            diagnostics=$(tail -n 80 desktop-build.log)
+            diagnostics="${diagnostics//'%'/'%25'}"
+            diagnostics="${diagnostics//$'\r'/'%0D'}"
+            diagnostics="${diagnostics//$'\n'/'%0A'}"
+            printf '::error title=Desktop build diagnostics::%s\n' "$diagnostics"
+            exit 1
+          fi
       - name: Backup routing and bundled font tests
         run: cargo test --locked -p sync-ssh --bin sync-ssh --test bundled_fonts
       - name: Terminal rendering and search tests
